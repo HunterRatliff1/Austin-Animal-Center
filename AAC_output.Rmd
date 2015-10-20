@@ -1,0 +1,211 @@
+---
+title: "AAC-Intake"
+author: "Hunter Ratliff"
+date: "October 16, 2015"
+output: html_document
+---
+
+```{r Define functions, collapse=T, echo=F}
+# ---------------------------------------------------------------------------------------------------
+# Required packages
+packs= c("ggplot2", "dplyr", "lubridate", "reshape2", "magrittr", "stringi", 
+         "tidyr", "ggthemes", "scales", "RSocrata")
+# Read them
+sapply(packs, require, character.only=TRUE)  
+
+# Functions
+simple_breed = function (data_frame, cutoff, replace_name = "Other")
+{
+  newDF = group_by(data_frame, Breed) %>% 
+    mutate(Animal.Breed = ifelse(n() > cutoff, Breed, replace_name)) %>% 
+    ungroup() 
+  
+  newDF$Breed = as.factor(newDF$Animal.Breed)
+  select(newDF, -Animal.Breed)
+  
+}
+SN_Sex_replacer = function (data_frame)
+{
+  require("dplyr")
+  # Construct data frame to match "Sex.upon.Outcome"
+  Sex.upon.Outcome = c("Intact Male", "Intact Female", "Neutered Male", "Spayed Female", "Unknown")
+  SN    = c("Intact",      "Intact",        "Neutered",      "Spayed",        NA)
+  Sex   = c("M",           "F",             "M",             "F",             NA)
+  Sex.upon.Outcome = data_frame(Sex.upon.Outcome, SN, Sex)
+  
+  newDF = merge(data_frame, Sex.upon.Outcome, by=c("Sex.upon.Outcome", "Sex.upon.Outcome"))
+  newDF$SN  = as.factor(newDF$SN)
+  newDF$Sex = as.factor(newDF$Sex)
+  
+  select(newDF, -Sex.upon.Outcome)
+}
+age_fxn = function (string)
+{
+  require("lubridate")
+  results = unlist(strsplit(string, " "))
+  # str(results)
+  # str(results)
+  # results[1]
+  # results[2]
+  
+  dur = duration(num = as.integer(results[1]), units = as.character(results[2]))
+  as.duration(dur)
+  
+}
+
+citation = function (text="Hunter Ratliff | 2015", email="HunterRatliff1@gmail.com", 
+                     text.color="black", email.color="grey")
+{
+  require(grid)
+  require(gridExtra)
+  grid.text(text,
+            x = unit(0.97, "npc"), y = unit(0.03, "npc"), just = c("right", "bottom"), 
+            gp = gpar(fontface = "bold", fontsize = 14, col = text.color))
+  grid.text(email,
+            x = unit(0.03, "npc"), y = unit(0.03, "npc"), just = c("left", "bottom"), 
+            gp = gpar(fontsize = 9, col = email.color))
+}
+ 
+
+```
+   
+# Austin Animal Center FY15 Outcomes *Updated Hourly*   
+Uses the City of Austin's data service <http://data.austintexas.gov> to pull Austin Animal Center's "outcomes" data set as a CSV ([link](https://data.austintexas.gov/Government/Austin-Animal-Center-FY15-Outcomes-Updated-Hourly-/fb53-k8de))
+   
+   
+### Load data from site 
+   
+```{r Load HourOutcomes, collapse=T, echo=F}
+# Austin Animal Center FY15 Outcomes *Updated Hourly*
+HourOutcomes <- RSocrata::read.socrata("https://data.austintexas.gov/resource/fb53-k8de.csv")
+
+# Allowed types of outcomes
+ListOfOutcomes = c("Adoption", "Euthanasia", "Return to Owner", "Transfer")
+
+# Transform results
+Outcomes = HourOutcomes %>%
+  # Read in date column as a date
+  mutate(Outcome.Date = mdy(Outcome.Date)) %>% 
+  
+  # Only select cats and dogs
+  filter(Animal.Type %in% c("Cat", "Dog")) %>%
+  
+  # Clean up the List of breeds and outcomes
+  mutate(
+    Outcome.Type     = ifelse(Outcome.Type %in% ListOfOutcomes, Outcome.Type, "Other"),
+    Breed            = gsub(" Mix", "", Breed)
+  ) 
+
+# Splits the "Sex.upon.Outcome" column into two columns, sex and spay/neuter
+Outcomes = SN_Sex_replacer(Outcomes)
+
+# If a breed has less that 'cutoff' instances, then it becomes known as "other"
+Outcomes = simple_breed(Outcomes, cutoff = 30)
+
+# Make these columns factors
+Outcomes$Outcome.Type     = as.factor(Outcomes$Outcome.Type)
+Outcomes$Outcome.Subtype  = as.factor(Outcomes$Outcome.Subtype )
+Outcomes$Animal.Type      = as.factor(Outcomes$Animal.Type )
+Outcomes$Animal.ID        = as.factor(Outcomes$Animal.ID)
+
+```
+   
+### Summary of data
+   
+```{r Load Outcome summaries, collapse=T, echo=F}
+summary(Outcomes)
+```
+   
+***
+   
+# Outcome Graphs
+### Count vs Time
+```{r Over time, fig.height=6, fig.width=12, fig.align='center', collapse=T, results='hold', echo=F}
+qplot(data=Outcomes, x=Outcome.Date, fill=Outcome.Type, position = "stack") + 
+  facet_wrap("Animal.Type") + ggtitle("AAC: Outcomes\nOver time") + theme_fivethirtyeight()
+```
+
+
+
+### 1) Overall: Number of animals over year by subtype
+```{r Number of animals over year by subtype, fig.height=4, fig.width=12, fig.align='center', collapse=T, results='hold', echo=F}
+Outcomes %>% select(everything()) %>%
+  mutate(Outcome.Date = ceiling_date(Outcome.Date, unit="week")) %>%
+  group_by(Outcome.Date, Outcome.Type, Animal.Type) %>% 
+  summarise(count = n()) %>%
+  ggplot(aes(x=Outcome.Date, y=Outcome.Type)) + 
+  ggtitle("AAC Outcomes: \nNumber of animals over year by subtype") + labs(x="Week", y="Outcome") +
+  theme_fivethirtyeight() + guides(fill=FALSE) +
+  geom_tile(aes(z=count, alpha=count, fill=Animal.Type)) + facet_wrap("Animal.Type")
+citation()
+```
+   
+   
+   
+   
+## Outcomes: Euthanasia 
+Calculate data frame of animals (cats and dogs only) euthanized at Austin Animal Center
+```{r rates, fig.height=15, fig.width=10, fig.align='center', collapse=T, results='hold', echo=F}
+# Build data frame for euthanasia
+euth.breed = Outcomes %>% select(everything()) %>% 
+  group_by(Animal.Type, Breed) %>% mutate(Num.Breed = n()) %>% ungroup() %>%
+  group_by(Animal.Type, Outcome.Type, Breed) %>% mutate(Num.Breed.Out = n()) %>% ungroup() %>%
+  filter(Outcome.Type=="Euthanasia") %>%
+  mutate(Outcome.Date = ceiling_date(Outcome.Date, unit="week")) %>%
+  group_by(Animal.Type, Breed, Outcome.Subtype, Num.Breed, Num.Breed.Out) %>% 
+  summarise(count = n()) %>% ungroup() %>% group_by(Animal.Type, Breed)
+```
+
+
+
+
+### 2) Dogs: By breed
+
+```{r rates by dog breed, fig.height=16, fig.width=12, fig.align='center', collapse=T, results='hold', echo=F}
+group_by(euth.breed, Animal.Type, Breed, Num.Breed) %>% 
+  summarise(Num.Breed.Out = sum(count)) %>% ungroup() %>% 
+  filter(Animal.Type=="Dog", Num.Breed.Out/Num.Breed > 0.05) %>%
+  
+  ggplot(aes(y=Num.Breed.Out, x=Num.Breed.Out/Num.Breed, color=Breed)) + 
+  scale_x_continuous(labels=percent) + scale_y_log10() +
+  scale_size_continuous(range = c(2, 5)) + scale_alpha_continuous(range=c(0.2,0.9)) + 
+  ggtitle("Euthanasia rates for Dogs by Breed") + 
+  labs(x="Percent of Breed euthanized", y="Number of Breed that is euthanized") + 
+  theme_economist_white() + guides(color=FALSE, size=FALSE, alpha=FALSE) +
+  geom_point(aes(size=Num.Breed), alpha=0.3, color="black") + 
+  geom_point(aes(size=Num.Breed.Out)) + 
+  geom_text(vjust=0, hjust=1, angle=80, size=4,
+            aes(alpha=Num.Breed, position = "jitter", 
+                label = paste0(Breed, " (", Num.Breed.Out, " of ", Num.Breed, ")")))
+citation()
+```
+
+
+
+
+### 3) Number of outcome subtypes by breed
+
+```{r, fig.height=16, fig.width=16, fig.align='center', collapse=T, results='hold', echo=F}
+ggplot(euth.breed, aes(x=Outcome.Subtype, y=Breed)) + 
+  geom_tile(aes(z=count, fill=Num.Breed.Out/Num.Breed, alpha=count)) + 
+  facet_wrap("Animal.Type", scales = "free") + 
+  ggtitle("AAC Euthanasia: \nNumber of outcome subtypes by breed") + labs(x="Sub-type", y="Breed") +
+  theme_fivethirtyeight() + scale_fill_continuous(name = "Percent of breed Euthanized", low="green", high="red") + 
+  scale_alpha_continuous(range = c(0.3, 0.9))
+citation()
+```
+
+
+
+
+### 4) Reason by Breed   
+
+```{r reason by breed, AAC_Euthanasia_ReasonByBreed, fig.width=10, fig.height=10, collapse=T, results='hold', echo=F}
+ggplot(filter(euth.breed, Animal.Type=="Dog"), aes(x=Breed, y=Num.Breed.Out)) + coord_flip() + 
+  ggtitle("AAC Euthanasia: Reason by Breed") + 
+  geom_bar(stat="identity", aes(alpha=Num.Breed.Out/Num.Breed, fill=Outcome.Subtype)) +
+  labs(x="Breed", y="Number of animals euthanized") + theme_economist_white() + 
+  scale_alpha_continuous(name="Percent of Breed that is euthanized") + 
+  scale_color_discrete(name="Reason for euthanasia")
+citation(text = "", email = "Hunter Ratliff\nhunterratliff1@gmail.com")
+```
