@@ -2,20 +2,30 @@
 title: "AAC-Intake"
 author: "Hunter Ratliff"
 date: "October 16, 2015"
-output: html_document
+output: 
+  html_document:
+    theme: united
+    toc: true
 ---
 
+
+```{r global_options, include=FALSE}
+require(knitr)
+# opts_knit$set(root.dir = "..")
+
+## Sets output for figures
+knitr::opts_chunk$set(fig.width=12, fig.height=10, fig.path='Figures/',
+                      echo=FALSE, warning=FALSE, message=FALSE, fig.align='center')
+```
+       
 ```{r Define functions, collapse=T, echo=F}
 # ---------------------------------------------------------------------------------------------------
 # Required packages
-packs= c("ggplot2", "dplyr", "lubridate", "reshape2", "magrittr", "stringi", 
-         "tidyr", "ggthemes", "scales", "RSocrata")
-# Read them
-sapply(packs, require, character.only=TRUE)  
+sapply(c("ggplot2", "dplyr", "lubridate", "reshape2", "magrittr", "stringi", "RColorBrewer",
+         "tidyr", "ggthemes", "scales", "RSocrata", "gridExtra", "extrafont"), require, character.only=TRUE)  
 
 # Functions
-simple_breed = function (data_frame, cutoff, replace_name = "Other")
-{
+simple_breed <- function (data_frame, cutoff, replace_name = "Other") {
   newDF = group_by(data_frame, Breed) %>% 
     mutate(Animal.Breed = ifelse(n() > cutoff, Breed, replace_name)) %>% 
     ungroup() 
@@ -24,8 +34,8 @@ simple_breed = function (data_frame, cutoff, replace_name = "Other")
   select(newDF, -Animal.Breed)
   
 }
-SN_Sex_replacer = function (data_frame)
-{
+
+SN_Sex_replacer <- function (data_frame) {
   require("dplyr")
   # Construct data frame to match "Sex.upon.Outcome"
   Sex.upon.Outcome = c("Intact Male", "Intact Female", "Neutered Male", "Spayed Female", "Unknown")
@@ -39,8 +49,8 @@ SN_Sex_replacer = function (data_frame)
   
   select(newDF, -Sex.upon.Outcome)
 }
-age_fxn = function (string)
-{
+
+age_fxn <- function (string) {
   require("lubridate")
   results = unlist(strsplit(string, " "))
   # str(results)
@@ -53,54 +63,69 @@ age_fxn = function (string)
   
 }
 
-citation = function (text="Hunter Ratliff | 2015", email="HunterRatliff1@gmail.com", 
-                     text.color="black", email.color="grey")
-{
-  require(grid)
-  require(gridExtra)
-  grid.text(text,
-            x = unit(0.97, "npc"), y = unit(0.03, "npc"), just = c("right", "bottom"), 
-            gp = gpar(fontface = "bold", fontsize = 14, col = text.color))
-  grid.text(email,
-            x = unit(0.03, "npc"), y = unit(0.03, "npc"), just = c("left", "bottom"), 
-            gp = gpar(fontsize = 9, col = email.color))
-}
- 
+# Load citation script
+source("~/Github/Citations/Citation Function.R")
 
+# Theme object
+theme_coa <- theme_economist() + 
+  theme(
+    panel.background  = element_rect(fill="#E0DED3"), #FFFFFF
+    plot.background   = element_rect(fill="#E0DED3"), 
+    strip.background  = element_rect(fill="#713D3A"), 
+    strip.text        = element_text(color = "#FFFFFF"),
+    legend.background = element_rect(fill = "transparent"),
+    plot.title = element_text(family="Impact", colour = "#A25614", size = 24), 
+    legend.position = "bottom",
+    legend.title = element_text(family="Georgia", size=14),
+    axis.title   = element_text(family="Georgia", face = "bold", size=16, colour = "#393939"),
+    axis.text.x = element_text(color="#654B2F", vjust = 1, family="Verdana", face = "italic"),
+    axis.text.y = element_text(color="#654B2F", hjust = 1, family="Verdana", face = "italic")) 
 ```
    
 # Austin Animal Center FY15 Outcomes *Updated Hourly*   
-Uses the City of Austin's data service <http://data.austintexas.gov> to pull Austin Animal Center's "outcomes" data set as a CSV ([link](https://data.austintexas.gov/Government/Austin-Animal-Center-FY15-Outcomes-Updated-Hourly-/fb53-k8de))
+Uses the City of Austin's data service <http://data.austintexas.gov> to pull Austin Animal Center's "outcomes" of all cats and dogs leaving the city shelter ([link](https://data.austintexas.gov/Government/Austin-Animal-Center-FY15-Outcomes-Updated-Hourly-/fb53-k8de))
    
    
 ### Load data from site 
    
-```{r Load HourOutcomes, collapse=T, echo=F}
+```{r Load | HourOutcomes, collapse=T, echo=T}
 # Austin Animal Center FY15 Outcomes *Updated Hourly*
-HourOutcomes <- RSocrata::read.socrata("https://data.austintexas.gov/resource/fb53-k8de.csv")
+Animal.Outcomes <- RSocrata::read.socrata("https://data.austintexas.gov/resource/fb53-k8de.csv")
 
-# Allowed types of outcomes
-ListOfOutcomes = c("Adoption", "Euthanasia", "Return to Owner", "Transfer")
+Outcomes <- Animal.Outcomes
+Outcomes$Breed = gsub(" Mix", "", Outcomes$Breed)
+Outcomes <- separate(Outcomes, col = Breed, into = c("Breed.Primary", "Breed.Secondary"), sep = "/", remove = T, fill = "right")
+Outcomes$Breed.Secondary[is.na(Outcomes$Breed.Secondary)] <- Outcomes$Breed.Primary[is.na(Outcomes$Breed.Secondary)]
+
+# Blank string become NA
+Outcomes[Outcomes==""] <- NA
 
 # Transform results
-Outcomes = HourOutcomes %>%
+Outcomes <- Outcomes %>%
   # Read in date column as a date
   mutate(Outcome.Date = mdy(Outcome.Date)) %>% 
-  
   # Only select cats and dogs
   filter(Animal.Type %in% c("Cat", "Dog")) %>%
-  
   # Clean up the List of breeds and outcomes
-  mutate(
-    Outcome.Type     = ifelse(Outcome.Type %in% ListOfOutcomes, Outcome.Type, "Other"),
-    Breed            = gsub(" Mix", "", Breed)
-  ) 
+  mutate(Outcome.Type = ifelse(Outcome.Type %in% c("Adoption", "Euthanasia", "Return to Owner", "Transfer"), 
+                               Outcome.Type, "Other"))
+    
 
 # Splits the "Sex.upon.Outcome" column into two columns, sex and spay/neuter
-Outcomes = SN_Sex_replacer(Outcomes)
+Outcomes <- SN_Sex_replacer(Outcomes)
 
 # If a breed has less that 'cutoff' instances, then it becomes known as "other"
-Outcomes = simple_breed(Outcomes, cutoff = 30)
+# Outcomes <- simple_breed(Outcomes, cutoff = 10)
+
+# Creates the 'Age' vector in days
+Outcomes <- separate(Outcomes, col = Age.upon.Outcome, into = c("Age.Num", "Age.Unit"), sep = " ", remove = T, fill = "right")
+Outcomes$Age <- ifelse(Outcomes$Age.Unit=="years"  | Outcomes$Age.Unit=="year",  365, 0)
+Outcomes$Age <- ifelse(Outcomes$Age.Unit=="months" | Outcomes$Age.Unit=="month", 30,  Outcomes$Age)
+Outcomes$Age <- ifelse(Outcomes$Age.Unit=="weeks"  | Outcomes$Age.Unit=="week",  7,   Outcomes$Age)
+Outcomes$Age <- ifelse(Outcomes$Age.Unit=="days"   | Outcomes$Age.Unit=="day",   1,   Outcomes$Age)
+Outcomes$Age <- Outcomes$Age * as.numeric(Outcomes$Age.Num)
+
+
 
 # Make these columns factors
 Outcomes$Outcome.Type     = as.factor(Outcomes$Outcome.Type)
@@ -110,102 +135,337 @@ Outcomes$Animal.ID        = as.factor(Outcomes$Animal.ID)
 
 ```
    
-### Summary of data
-   
-```{r Load Outcome summaries, collapse=T, echo=F}
-summary(Outcomes)
+```{r Build | Out}
+Out <- select(Outcomes, Animal.ID, SN, Sex, Age, Type=Outcome.Type, Subtype=Outcome.Subtype, 
+              Date=Outcome.Date, Animal.Type, Primary=Breed.Primary, Secondary=Breed.Secondary) %>%
+  filter(Type != "Other")
+
+# # Linear Model
+# lm(Age ~ Date + Sex + Type + Primary, data = Out) %>% summary()
+```
+
+## High Level Outcome Numbers
+
+```{r Fig01}
+ggplot(Out, aes(x=Type, fill=Sex)) + geom_histogram(position = "dodge", color="#000000") + 
+  scale_fill_hc() + theme_coa + 
+  labs(title="AAC Outcomes: By Sex", x="", y="")
+citation.htr(text = "Figure 01", color = "#5F5F5F")
+```
+
+> **Figure 01:** Histogram of each `Outcome Type`, grouped by `Sex`
+
+***
+
+```{r Fig02}
+ggplot(Out, aes(x=Type, fill=Animal.Type)) + geom_histogram(position = "dodge", color="#000000") +
+  scale_fill_fivethirtyeight(name="Species") + theme_coa + 
+  labs(title="AAC Outcomes: By Species", x="", y="")
+citation.htr(text = "Figure 02", color = "#5F5F5F")
+```
+
+> **Figure 02:** Histogram of each `Outcome Type`, grouped by `Species`
+
+***
+
+```{r Fig03 | define}
+plot_03 <- ggplot(Out, aes(x=Animal.Type, fill=Type)) + 
+  theme_coa + theme(legend.position="left", legend.direction="vertical") +
+  labs(title="AAC Outcomes: By Species & Age", x="", y="Age")
+```   
+ 
+```{r Fig03a}
+grid.arrange(
+  plot_03 + geom_boxplot(aes(y=Age/365)) + ylim(c(0, 15)) + labs(y="Age (years)"),
+  plot_03 + geom_violin(aes(y=Age/365)) + ylim(c(0, 15)) + labs(title="", y="Age (years)") + guides(fill=F), ncol=1)
+citation.htr(text = "Figure 03A", color = "#5F5F5F")
+```   
+ 
+```{r Fig03b}
+grid.arrange(    
+  plot_03 + geom_boxplot(aes(y=Age/30)) + ylim(c(0, 40)) + labs(title="...in Months", y="Age (months)"),
+  plot_03 + geom_violin(aes(y=Age/30)) + ylim(c(0, 40)) + labs(title="", y="Age (months)") + guides(fill=F), ncol=1)
+citation.htr(text = "Figure 03C", color = "#5F5F5F")
+```   
+
+```{r Fig03c}
+grid.arrange(    
+  plot_03 + geom_boxplot(aes(y=Age/7)) + ylim(c(0, 170)) + labs(title="...in Weeks", y="Age (weeks)"),
+  plot_03 + geom_violin(aes(y=Age/7)) + ylim(c(0, 170)) + labs(title="", y="Age (weeks)")  + guides(fill=F), ncol=1)
+citation.htr(text = "Figure 03C", color = "#5F5F5F")
+```   
+ 
+ > **Figure 03:** Boxplots (*top*) and Violin plots (*bottom*) of each `Age` & `Species`, grouped by `Outcome Type`
+ 
+ The figure has three parts with different sclaes on the y-axis: 
+ 
+ 1. **Part A** measuring `Age` in years
+ 2. **Part B** measuring `Age` in months
+ 3. **Part C** measuring `Age` in weeks
+ 
+ All three figures represnet the same dataset, so don't be confused!
+ 
+***
+ 
+# Outcomes Over The Course Of The Year 
+ 
+```{r Fig04}  
+PalFun <- colorRampPalette(brewer.pal(n = 9, "Spectral"))
+paletteSize <- 128
+PalPalette <- PalFun(paletteSize)
+
+ggplot(Out, aes(x=month(Date, label = T), y=Type, group=Type)) + 
+  stat_density(aes(fill=..density..), geom="tile", position="identity") + facet_wrap("Animal.Type") + 
+  scale_fill_gradient2(name = "Frequency", low = PalPalette[1],
+                       mid = PalPalette[paletteSize/2], high = PalPalette[paletteSize]) +
+  theme_coa + theme(
+    axis.text.x = element_text(angle = 90),
+    axis.text.y = element_text(angle = 45))  +
+  labs(x="Month", y="Subtype of Outcome", title="Outcome Types: By Month")
+citation.htr(text = "Figure 04", color = "#5F5F5F")
 ```
    
+> **Figure 04:** Frequency of `Outcome Type` over the time period of one year
+
 ***
    
-# Outcome Graphs
-### Count vs Time
-```{r Over time, fig.height=6, fig.width=12, fig.align='center', collapse=T, results='hold', echo=F}
-qplot(data=Outcomes, x=Outcome.Date, fill=Outcome.Type, position = "stack") + 
-  facet_wrap("Animal.Type") + ggtitle("AAC: Outcomes\nOver time") + theme_fivethirtyeight()
-```
+```{r Fig05 | define}
+PalFun <- colorRampPalette(brewer.pal(n = 9, "Spectral"))
+paletteSize <- 256
+PalPalette <- PalFun(paletteSize)
+```   
+ 
+## Cats 
+ 
+```{r Fig05a}
+Out %>% 
+  filter(Animal.Type=="Cat") %>%
+ggplot(aes(x=month(Date, label = T), y=Type, group=Type)) +
+  stat_density(aes(fill=..count..), geom="tile", position="identity") + #facet_wrap("Type", scales = "free") + 
+  scale_fill_gradient2(name = "Outcome Type Count", low = PalPalette[1],
+                       mid = PalPalette[paletteSize/2], high = PalPalette[paletteSize]) +
+  theme_coa + theme(axis.text.x = element_text(angle = 0),
+                    axis.text.y = element_text(angle = 45), 
+                    legend.text = element_text(angle = 45, face = "italic"))  +
+  labs(x="Month", y="Type of Outcome", title="Outcome Types By Month: Cats")
+citation.htr(text = "Figure 05A", color = "#5F5F5F")
+```   
+ 
+```{r Fig05b}
+Out %>% 
+  filter(Animal.Type=="Cat") %>%
+ggplot(aes(x=month(Date, label = T), y=Type, group=Type)) +
+  stat_density(aes(fill=..density..), geom="tile", position="identity") + #facet_wrap("Type", scales = "free") + 
+  scale_fill_gradient2(name = "Outcome Type Density", low = PalPalette[1],
+                       mid = PalPalette[paletteSize/2], high = PalPalette[paletteSize]) +
+  theme_coa + theme(axis.text.x = element_text(angle = 0),
+                    axis.text.y = element_text(angle = 45), 
+                    legend.text = element_text(angle = 45, face = "italic"))  +
+  labs(x="Month", y="Type of Outcome", title="Outcome Types By Month: Cats [Density]")
+citation.htr(text = "Figure 05B", color = "#5F5F5F")
+```   
+ 
+> **Figure 05(a):** Heatmap representing the total **count** of cats with each `Outcome Type` on a month by month interval   
+> **Figure 05(b):** Heatmap representing the **density** of each `Outcome Type` in respect to the month (cats only)    
+ 
+## Dogs 
+ 
+```{r Fig05c}
+Out %>% 
+  filter(Animal.Type=="Dog") %>%
+ggplot(aes(x=month(Date, label = T), y=Type, group=Type)) +
+  stat_density(aes(fill=..count..), geom="tile", position="identity") + #facet_wrap("Type", scales = "free") + 
+  scale_fill_gradient2(name = "Outcome Count", low = PalPalette[1],
+                       mid = PalPalette[paletteSize/2], high = PalPalette[paletteSize]) +
+  theme_coa + theme(axis.text.x = element_text(angle = 0),
+                    axis.text.y = element_text(angle = 45), 
+                    legend.text = element_text(angle = 45, face = "italic"))  +
+  labs(x="Month", y="Type of Outcome", title="Outcome Types By Month: Dogs")
+citation.htr(text = "Figure 05C", color = "#5F5F5F")
+```   
+ 
+```{r Fig05d}
+Out %>% 
+  filter(Animal.Type=="Dog") %>%
+ggplot(aes(x=month(Date, label = T), y=Subtype, group=Subtype)) +
+  stat_density(aes(fill=..density..), geom="tile", position="identity") + #facet_wrap("Type", scales = "free") + 
+  scale_fill_gradient2(name = "Outcome Subtype Density", low = PalPalette[1],
+                       mid = PalPalette[paletteSize/2], high = PalPalette[paletteSize]) +
+  theme_coa + theme(axis.text.x = element_text(angle = 0),
+                    axis.text.y = element_text(angle = 45), 
+                    legend.text = element_text(angle = 45, face = "italic"))  +
+  labs(x="Month", y="Subtype of Outcome", title="Outcome Subtypes By Month: Dogs [Density]")
+citation.htr(text = "Figure 05D", color = "#5F5F5F")
+```   
 
-
-
-### 1) Overall: Number of animals over year by subtype
-```{r Number of animals over year by subtype, fig.height=4, fig.width=12, fig.align='center', collapse=T, results='hold', echo=F}
-Outcomes %>% select(everything()) %>%
-  mutate(Outcome.Date = ceiling_date(Outcome.Date, unit="week")) %>%
-  group_by(Outcome.Date, Outcome.Type, Animal.Type) %>% 
-  summarise(count = n()) %>%
-  ggplot(aes(x=Outcome.Date, y=Outcome.Type)) + 
-  ggtitle("AAC Outcomes: \nNumber of animals over year by subtype") + labs(x="Week", y="Outcome") +
-  theme_fivethirtyeight() + guides(fill=FALSE) +
-  geom_tile(aes(z=count, alpha=count, fill=Animal.Type)) + facet_wrap("Animal.Type")
-citation()
-```
+> **Figure 05(c):** Heatmap representing the total **count** of dogs with each `Outcome Type` on a month by month interval   
+> **Figure 05(d):** Heatmap representing the **density** of each `Outcome Subtype` in respect to the month (dogs only). Note that the density calculation is grouped by `Outcome Subtype` **not** `Outcome Type` like *Figure 05(c)*   
    
+***   
    
-   
-   
-## Outcomes: Euthanasia 
-Calculate data frame of animals (cats and dogs only) euthanized at Austin Animal Center
-```{r rates, fig.height=15, fig.width=10, fig.align='center', collapse=T, results='hold', echo=F}
-# Build data frame for euthanasia
-euth.breed = Outcomes %>% select(everything()) %>% 
-  group_by(Animal.Type, Breed) %>% mutate(Num.Breed = n()) %>% ungroup() %>%
-  group_by(Animal.Type, Outcome.Type, Breed) %>% mutate(Num.Breed.Out = n()) %>% ungroup() %>%
-  filter(Outcome.Type=="Euthanasia") %>%
-  mutate(Outcome.Date = ceiling_date(Outcome.Date, unit="week")) %>%
-  group_by(Animal.Type, Breed, Outcome.Subtype, Num.Breed, Num.Breed.Out) %>% 
-  summarise(count = n()) %>% ungroup() %>% group_by(Animal.Type, Breed)
-```
+# Outcomes By Breed
 
+## Cats
 
+```{r Fig06 | define}
+By_Breed.Cat <- Out %>%
+  filter(Animal.Type=="Cat") %>%
+  melt(id.vars = c("Type", "Subtype"), measure.vars = c("Primary", "Secondary"), value.name = "Breed") %>% 
+  count(Type, Subtype, Breed, sort = T) %>% 
+  ungroup() %>% group_by(Breed) %>%
+  mutate(Count_Breed = sum(n)/2, Rel_to_breed = n/sum(n)) %>%
+  filter(Count_Breed>1) %>% ungroup() %>%
+  top_n(125, wt = Count_Breed) %>%
+  group_by(Breed) %>%
+  arrange(desc(Count_Breed)) 
 
+Fig06 <- By_Breed.Cat %>%
+  ggplot(aes(x=Breed, y=n/2, fill=Type)) + 
+  scale_fill_brewer(type="qual", palette = 7, name="Outcome Type") + theme_coa +
+  labs(x="", y="", title="Cat: Outcomes by Breed")
+```   
+ 
 
-### 2) Dogs: By breed
-
-```{r rates by dog breed, fig.height=16, fig.width=12, fig.align='center', collapse=T, results='hold', echo=F}
-group_by(euth.breed, Animal.Type, Breed, Num.Breed) %>% 
-  summarise(Num.Breed.Out = sum(count)) %>% ungroup() %>% 
-  filter(Animal.Type=="Dog", Num.Breed.Out/Num.Breed > 0.05) %>%
+```{r Fig06a}
+Fig06 + geom_bar(stat="identity") + 
+    labs(x="Primary Breed") + coord_flip() 
+citation.htr(text = "Figure 06A", color = "#5F5F5F") 
+```   
+ 
+```{r Fig06b}
+last_plot() + facet_wrap("Type") + labs(title="") + guides(fill=F)
+citation.htr(text = "Figure 06B", color = "#5F5F5F") 
+```   
+ 
+```{r Fig06c}
+Fig06 + geom_bar(stat="identity", position = "fill") + 
+    labs(x="Primary Breed", title="Density For Each Breed") + coord_flip() 
+citation.htr(text = "Figure 06C", color = "#5F5F5F")   
+```      
   
-  ggplot(aes(y=Num.Breed.Out, x=Num.Breed.Out/Num.Breed, color=Breed)) + 
-  scale_x_continuous(labels=percent) + scale_y_log10() +
-  scale_size_continuous(range = c(2, 5)) + scale_alpha_continuous(range=c(0.2,0.9)) + 
-  ggtitle("Euthanasia rates for Dogs by Breed") + 
-  labs(x="Percent of Breed euthanized", y="Number of Breed that is euthanized") + 
-  theme_economist_white() + guides(color=FALSE, size=FALSE, alpha=FALSE) +
-  geom_point(aes(size=Num.Breed), alpha=0.3, color="black") + 
-  geom_point(aes(size=Num.Breed.Out)) + 
-  geom_text(vjust=0, hjust=1, angle=80, size=4,
-            aes(alpha=Num.Breed, position = "jitter", 
-                label = paste0(Breed, " (", Num.Breed.Out, " of ", Num.Breed, ")")))
-citation()
+> **Figure 06(a):** This figure illustrates the number of cats that exit AAC by `Breed`. Each bar is further broken down by color representing the number of cats with each `Outcome Type`   
+> **Figure 06(b):** A similar view as *Figure 06(a)*, but instead of stacking the `Outcome Type`s, we facet by the types    
+> **Figure 06(c):** This figure demonstrates the relitive distribution of `Outcome Type` by measuring the density for each `Breed`      
+  
+***   
+
+## Dogs
+
+```{r Fig07 | define}
+By_Breed.Dog <- Out %>%
+  filter(Animal.Type=="Dog") %>%
+  melt(id.vars = c("Type", "Subtype"), measure.vars = c("Primary", "Secondary"), value.name = "Breed") %>% 
+#   mutate(
+#     Adopted    = ifelse(Type=="Adoption", 1, 0),
+#     Euthanized = ifelse(Type=="Euthanasia", 1, 0),
+#     RTO        = ifelse(Type=="Return to Owner", 1, 0),
+#     Transfer   = ifelse(Type=="Transfer", 1, 0),
+#     Mixed      = ifelse(Primary != Secondary, 1, 0)
+#   ) %>%
+  count(Type, Subtype, Breed, sort = T) %>% 
+  ungroup() %>% group_by(Breed) %>%
+  mutate(Count_Breed = sum(n)/2, Rel_to_breed = n/sum(n)) %>%
+  filter(Count_Breed>1) %>% ungroup() %>%
+  top_n(125, wt = Count_Breed) %>%
+  group_by(Breed) %>%
+  arrange(desc(Count_Breed)) 
+  
+
+Fig07 <- By_Breed.Dog %>%
+  ggplot(aes(x=Breed, y=n/2, fill=Type)) + 
+  scale_fill_brewer(type="qual", palette = 7, name="Outcome Type") + theme_coa +
+  labs(x="", y="", title="Dog: Outcomes by Breed")
 ```
 
+```{r Fig07a}
+Fig07 + geom_bar(stat="identity") + 
+    labs(x="Primary Breed") + coord_flip() 
+citation.htr(text = "Figure 07A", color = "#5F5F5F") 
+```   
+ 
+```{r Fig07b}
+last_plot() + facet_wrap("Type") + labs(title="") + guides(fill=F)
+citation.htr(text = "Figure 07B", color = "#5F5F5F") 
+```   
+ 
+```{r Fig07c}
+Fig07 + geom_bar(stat="identity", position = "fill") + 
+    labs(x="Primary Breed", title="Density For Each Breed") + coord_flip() 
+citation.htr(text = "Figure 07C", color = "#5F5F5F")   
+```   
 
+> **Figure 07(a):** This figure illustrates the number of dogs that exit AAC by `Breed`. Each bar is further broken down by color representing the number of dogs with each `Outcome Type`   
+> **Figure 07(b):** A similar view as *Figure 07(a)*, but instead of stacking the `Outcome Type`, we facet by the types    
+> **Figure 07(c):** This figure demonstrates the relitive distribution of `Outcome Type` by measuring the density for each `Breed`      
 
+***
 
-### 3) Number of outcome subtypes by breed
-
-```{r, fig.height=16, fig.width=16, fig.align='center', collapse=T, results='hold', echo=F}
-ggplot(euth.breed, aes(x=Outcome.Subtype, y=Breed)) + 
-  geom_tile(aes(z=count, fill=Num.Breed.Out/Num.Breed, alpha=count)) + 
-  facet_wrap("Animal.Type", scales = "free") + 
-  ggtitle("AAC Euthanasia: \nNumber of outcome subtypes by breed") + labs(x="Sub-type", y="Breed") +
-  theme_fivethirtyeight() + scale_fill_continuous(name = "Percent of breed Euthanized", low="green", high="red") + 
-  scale_alpha_continuous(range = c(0.3, 0.9))
-citation()
+# Euthanasia Reasons
+   
+```{r Fig08 | define}
+PalFun <- colorRampPalette(brewer.pal(n = 9, "YlOrRd"))
+paletteSize <- 256
+PalPalette <- PalFun(paletteSize)
+```   
+ 
+## Cats 
+ 
+```{r Fig08a}
+By_Breed.Cat %>%
+  filter(Type=="Euthanasia") %>%
+  ggplot(aes(x=Breed, y=Subtype, label=percent(Rel_to_breed))) + 
+  geom_tile(aes(fill=n/2)) + geom_text() + coord_flip() + theme_coa +
+   scale_fill_gradient2(name = "Number Euthanized", low = PalPalette[1],
+                       mid = PalPalette[paletteSize/2], high = PalPalette[paletteSize]) +
+  labs(y="Reason Euthanized", title="Cats Euthanized: By Breed & Reason")
+citation.htr(text = "Figure 08A", color = "#5F5F5F")   
 ```
 
+> **Figure 08(a):** Heatmap of the count of cats euthanized, broken down by `Breed` and `Reason`. The figure is also annotated with a number representing the percentage of that breed with each particular `Outcome Subtype` (i.e. reason for euthanasia) relative to the total number of animals of that breed who leave the shelter
 
+## Dogs
+  
+```{r Fig08b}
+By_Breed.Dog %>%
+  filter(Type=="Euthanasia") %>%
+  ggplot(aes(x=Breed, y=Subtype, label=percent(Rel_to_breed))) + 
+  geom_tile(aes(fill=n/2)) + geom_text() + coord_flip() + theme_coa +
+   scale_fill_gradient2(name = "Number Euthanized", low = PalPalette[1],
+                       mid = PalPalette[paletteSize/2], high = PalPalette[paletteSize]) +
+  labs(y="Reason Euthanized", title="Dogs Euthanized: By Breed & Reason")
+citation.htr(text = "Figure 08B", color = "#5F5F5F")   
+```  
+   
+> **Figure 08(b):** Heatmap of the count of dogs euthanized, broken down by `Breed` and `Reason`. The figure is also annotated with a number representing the percentage of that breed with each particular `Outcome Subtype` (i.e. reason for euthanasia) relative to the total number of animals of that breed who leave the shelter
 
+***
 
-### 4) Reason by Breed   
+<br><br><br>
 
-```{r reason by breed, AAC_Euthanasia_ReasonByBreed, fig.width=10, fig.height=10, collapse=T, results='hold', echo=F}
-ggplot(filter(euth.breed, Animal.Type=="Dog"), aes(x=Breed, y=Num.Breed.Out)) + coord_flip() + 
-  ggtitle("AAC Euthanasia: Reason by Breed") + 
-  geom_bar(stat="identity", aes(alpha=Num.Breed.Out/Num.Breed, fill=Outcome.Subtype)) +
-  labs(x="Breed", y="Number of animals euthanized") + theme_economist_white() + 
-  scale_alpha_continuous(name="Percent of Breed that is euthanized") + 
-  scale_color_discrete(name="Reason for euthanasia")
-citation(text = "", email = "Hunter Ratliff\nhunterratliff1@gmail.com")
+# Contact
+
+**Hunter Ratliff**
+
+Email: hunter.ratliff@austinpetsalive.org   
+Twitter: @[HunterRatliff1](https://twitter.com/HunterRatliff1)   
+
 ```
+Copyright (C) 2015 Hunter Ratliff
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+
+```
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
